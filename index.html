@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Helpdesk SolarZ no Chat</title>
+<!--
+  A ponte entre a aba do SolarZ Chat (Dashboard App do Chatwoot) e o helpdesk.
+
+  Por que existe: o Chat entrega os dados da conversa à aba por postMessage. O helpdesk roda no Apps Script, que põe a
+  página dentro de um quadro do Google e não recebe essa mensagem. Esta página, hospedada fora do Google (GitHub Pages,
+  Firebase Hosting ou outro estático), recebe a conversa e abre o helpdesk já com os dados no endereço.
+
+  Não guarda nada e não chama nenhum sistema: só lê o que o Chat manda e monta os links.
+  Para usar: troque HELPDESK abaixo pelo endereço do helpdesk e cadastre esta página no Chat em
+  Configurações > Integrações > Dashboard Apps.
+-->
+<style>
+  :root { --fundo:#f4f4f6; --cartao:#fff; --painel:#f6f6f8; --texto:#111113; --cinza:#5f5f66; --borda:#e4e4e7; --tinta:#111113; --tinta-t:#fff; --verde:#1f7a4d; }
+  @media (prefers-color-scheme: dark) { :root { --fundo:#121214; --cartao:#1a1a1d; --painel:#222226; --texto:#f4f4f5; --cinza:#a1a1aa; --borda:#2e2e33; --tinta:#f4f4f5; --tinta-t:#111113; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--fundo); color:var(--texto); font:14px/1.45 "Geist", system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { padding:16px; display:grid; gap:12px; }
+  .cartao { background:var(--cartao); border-radius:20px; padding:16px; box-shadow:0 1px 2px rgba(0,0,0,.05); display:grid; gap:12px; }
+  h1 { font-size:14px; font-weight:600; margin:0; letter-spacing:-.01em; }
+  p { margin:0; }
+  .cinza { color:var(--cinza); }
+  dl { margin:0; background:var(--painel); border-radius:14px; padding:4px 12px; }
+  dl div { display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--borda); }
+  dl div:last-child { border-bottom:0; }
+  dt { color:var(--cinza); } dd { margin:0; font-weight:500; text-align:right; word-break:break-word; }
+  a.botao { display:flex; align-items:center; justify-content:center; min-height:44px; border-radius:999px; font-weight:500; text-decoration:none; }
+  a.principal { background:var(--tinta); color:var(--tinta-t); }
+  a.secundario { border:1px solid var(--borda); color:var(--texto); background:var(--cartao); }
+  a:focus-visible { outline:3px solid color-mix(in srgb, var(--verde) 50%, transparent); outline-offset:2px; }
+  .espera { padding:24px 16px; text-align:center; }
+</style>
+</head>
+<body>
+<main id="app"><p class="espera cinza">Esperando os dados da conversa…</p></main>
+<script>
+  const HELPDESK = "https://script.google.com/a/macros/solarz.com.br/s/AKfycbzaj35RgUV2NsyjFn0aMg2l6lNYh63CMXYnXjipKDvN5PIBVDhwht4DcRWRybcgB7T1/exec";
+  const CHAT = "https://chat.solarz.com.br";
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+  // O que o Chat manda: { event: "appContext", data: { conversation, contact, currentAgent } }
+  function dados(ctx) {
+    const conv = ctx.conversation || {}, contato = ctx.contact || conv.meta?.sender || {};
+    const attrs = { ...(contato.custom_attributes || {}), ...(conv.custom_attributes || {}) };
+    // o ID de suporte vem do campo da conversa; sem ele, do nome do contato ("Eduardo - 49407")
+    const id = String(attrs.id_de_suporte || "").replace(/\D/g, "") || ((contato.name || "").match(/\b(\d{3,7})\b/) || [])[1] || "";
+    const empresa = contato.additional_attributes?.company_name || (contato.name || "").split(/\s+-\s+/).filter((p) => !/^\d+$/.test(p.trim())).slice(1).join(" - ");
+    const conta = conv.account_id || "", numero = conv.id || conv.display_id || "";
+    return {
+      id_suporte: id,
+      empresa: empresa || "",
+      contato: (contato.name || "").split(/\s+-\s+/)[0] || "",
+      whatsapp: String(contato.phone_number || "").replace(/\D/g, ""),
+      email: contato.email || "",
+      conversa: conta && numero ? `${CHAT}/app/accounts/${conta}/conversations/${numero}` : "",
+      numero_conversa: numero,
+      agente: ctx.currentAgent?.name || "",
+    };
+  }
+
+  function link(params) {
+    const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
+    return `${HELPDESK}?${q}`;
+  }
+
+  function desenhar(d) {
+    const novo = link({ tela: "novo", id_suporte: d.id_suporte, empresa: d.empresa, contato: d.contato, whatsapp: d.whatsapp, email: d.email, conversa: d.conversa });
+    const cliente = d.id_suporte ? link({ tela: "cliente", id_suporte: d.id_suporte }) : "";
+    document.getElementById("app").innerHTML = `
+      <section class="cartao">
+        <div><h1>Helpdesk</h1><p class="cinza">Tickets desta conversa. Abre numa aba nova, já com os dados do cliente.</p></div>
+        <dl>
+          <div><dt>Conversa</dt><dd>${esc(d.numero_conversa) || "sem número"}</dd></div>
+          <div><dt>ID de suporte</dt><dd>${esc(d.id_suporte) || "não informado"}</dd></div>
+          <div><dt>Contato</dt><dd>${esc(d.contato) || "sem nome"}</dd></div>
+        </dl>
+        <a class="botao principal" href="${esc(novo)}" target="_blank" rel="noopener">Abrir ticket desta conversa</a>
+        ${cliente ? `<a class="botao secundario" href="${esc(cliente)}" target="_blank" rel="noopener">Ver tickets deste cliente</a>` : `<p class="cinza">Sem ID de suporte na conversa: preencha o campo "ID de Suporte" para ver os tickets do cliente.</p>`}
+      </section>`;
+  }
+
+  window.addEventListener("message", (e) => {
+    if (e.origin !== CHAT) return; // só aceita a conversa vinda do SolarZ Chat
+    let msg = e.data;
+    try { if (typeof msg === "string") msg = JSON.parse(msg); } catch { return; }
+    if (msg?.event === "appContext" && msg.data) desenhar(dados(msg.data));
+  });
+  // pede os dados de novo, caso a primeira mensagem tenha chegado antes desta página carregar
+  window.parent.postMessage("chatwoot-dashboard-app:fetch-info", "*");
+</script>
+</body>
+</html>
